@@ -21,6 +21,7 @@ class WildberriesAPI:
         self.timeout = aiohttp.ClientTimeout(total=settings.WB_API_TIMEOUT)
         self.session: Optional[aiohttp.ClientSession] = None
         self.demo_mode = False  # Включается если API недоступен
+        self.auth_params = {}  # Параметры авторизации для запросов
         
     async def _switch_to_backup(self):
         """Switch to backup URL if main URL fails"""
@@ -114,6 +115,12 @@ class WildberriesAPI:
         
         url = f"{self.current_url}{endpoint}"
         logger.debug(f"Making {method} request to: {url}")
+        
+        # Add auth params if they exist
+        if self.auth_params:
+            params = kwargs.get('params', {})
+            params.update(self.auth_params)
+            kwargs['params'] = params
         
         try:
             async with self.session.request(method, url, **kwargs) as response:
@@ -227,38 +234,108 @@ class WildberriesAPI:
     async def validate_api_key(self) -> bool:
         """Validate API key by making a test request"""
         try:
+            logger.info(f"Validating API key: {self.api_key[:10]}...")
+            
             # First test basic connectivity
             if not await self._test_connectivity():
                 logger.warning("Basic connectivity test failed, but proceeding with API validation")
             
-            # Try multiple endpoints for validation
-            test_endpoints = [
-                "/api/v1/warehouses",
-                "/api/v1/supply/slots",
-                "/ping",
-                "/"
+            # Try different authorization methods
+            auth_methods = [
+                # Method 1: Bearer token in header (standard)
+                {"headers": {"Authorization": f"Bearer {self.api_key}"}},
+                # Method 2: API key in header without Bearer
+                {"headers": {"Authorization": self.api_key}},
+                # Method 3: API key in query parameter
+                {"params": {"key": self.api_key}},
+                # Method 4: API key in different header formats
+                {"headers": {"X-API-Key": self.api_key}},
+                {"headers": {"Api-Key": self.api_key}},
+                {"headers": {"WB-API-Key": self.api_key}},
             ]
             
-            for endpoint in test_endpoints:
-                try:
-                    logger.info(f"Testing API key with endpoint: {endpoint}")
-                    await self._make_request("GET", endpoint)
-                    logger.info(f"API key validation successful with endpoint: {endpoint}")
-                    return True
-                except InvalidAPIKeyError:
-                    logger.error(f"Invalid API key detected with endpoint: {endpoint}")
-                    return False
-                except Exception as e:
-                    logger.warning(f"Failed to test endpoint {endpoint}: {e}")
-                    continue
+            # Try different endpoints with different auth methods
+            test_endpoints = [
+                "/api/v1/warehouses",
+                "/api/v1/supply/slots", 
+                "/api/v1/info",
+                "/api/v1/ping",
+                "/ping"
+            ]
             
-            # If all endpoints fail, enable demo mode but consider key as valid
+            for auth_method in auth_methods:
+                for endpoint in test_endpoints:
+                    try:
+                        logger.info(f"Testing API key with endpoint: {endpoint}, auth: {list(auth_method.keys())}")
+                        
+                        # Create temporary session with specific auth
+                        connector = aiohttp.TCPConnector(
+                            family=socket.AF_INET,
+                            ttl_dns_cache=300,
+                            use_dns_cache=True,
+                            limit=100,
+                            limit_per_host=30,
+                            enable_cleanup_closed=True
+                        )
+                        
+                        headers = {
+                            "Content-Type": "application/json",
+                            "User-Agent": "WB-Supply-Bot/1.0"
+                        }
+                        
+                        # Add auth headers if specified
+                        if "headers" in auth_method:
+                            headers.update(auth_method["headers"])
+                        
+                        async with aiohttp.ClientSession(
+                            headers=headers,
+                            timeout=self.timeout,
+                            connector=connector
+                        ) as test_session:
+                            
+                            url = f"{self.current_url}{endpoint}"
+                            params = auth_method.get("params", {})
+                            
+                            async with test_session.get(url, params=params) as response:
+                                logger.info(f"Response: {response.status} for {endpoint}")
+                                
+                                if response.status == 200:
+                                    logger.info(f"✅ API key validation successful!")
+                                    logger.info(f"Working endpoint: {endpoint}")
+                                    logger.info(f"Working auth method: {auth_method}")
+                                    
+                                    # Update session configuration for future requests
+                                    await self._update_session_config(auth_method)
+                                    return True
+                                    
+                                elif response.status == 401:
+                                    logger.debug(f"Unauthorized for {endpoint} with {auth_method}")
+                                    continue
+                                    
+                                elif response.status == 404:
+                                    logger.debug(f"Endpoint {endpoint} not found")
+                                    continue
+                                    
+                                else:
+                                    response_text = await response.text()
+                                    logger.debug(f"Response {response.status}: {response_text}")
+                                    
+                    except Exception as e:
+                        logger.debug(f"Failed {endpoint} with {auth_method}: {e}")
+                        continue
+            
+            # If no auth method worked, try demo mode
+            logger.warning("No working authorization method found")
+            
+            # Try to get more info about the API key format
+            await self._diagnose_api_key()
+            
+            # Enable demo mode as fallback
             if not self.demo_mode:
                 await self._enable_demo_mode()
-                logger.info("API endpoints unavailable, enabling demo mode. API key considered valid.")
+                logger.info("API key validation failed, enabling demo mode")
                 return True
             
-            logger.error("All API validation endpoints failed")
             return False
             
         except Exception as e:
@@ -266,6 +343,58 @@ class WildberriesAPI:
             # Enable demo mode and consider key valid for demo
             await self._enable_demo_mode()
             return True
+    
+    async def _update_session_config(self, auth_method: dict):
+        """Update session configuration based on working auth method"""
+        if self.session:
+            await self.session.close()
+        
+        headers = {
+            "Content-Type": "application/json",
+            "User-Agent": "WB-Supply-Bot/1.0"
+        }
+        
+        # Add auth headers if specified
+        if "headers" in auth_method:
+            headers.update(auth_method["headers"])
+        
+        connector = aiohttp.TCPConnector(
+            family=socket.AF_INET,
+            ttl_dns_cache=300,
+            use_dns_cache=True,
+            limit=100,
+            limit_per_host=30,
+            enable_cleanup_closed=True
+        )
+        
+        self.session = aiohttp.ClientSession(
+            headers=headers,
+            timeout=self.timeout,
+            connector=connector
+        )
+        
+        # Store auth params for future requests
+        self.auth_params = auth_method.get("params", {})
+    
+    async def _diagnose_api_key(self):
+        """Diagnose API key format issues"""
+        logger.info("🔍 Диагностика API ключа:")
+        logger.info(f"Длина ключа: {len(self.api_key)}")
+        logger.info(f"Первые символы: {self.api_key[:10]}...")
+        logger.info(f"Последние символы: ...{self.api_key[-10:]}")
+        
+        # Check common patterns
+        if self.api_key.startswith("Bearer "):
+            logger.warning("⚠️  API ключ содержит 'Bearer ' - возможно, нужно убрать это")
+        
+        if len(self.api_key) < 10:
+            logger.warning("⚠️  API ключ слишком короткий")
+        
+        if " " in self.api_key:
+            logger.warning("⚠️  API ключ содержит пробелы")
+        
+        if not self.api_key.replace("-", "").replace("_", "").isalnum():
+            logger.info("ℹ️  API ключ содержит специальные символы (возможно, это нормально)")
 
     async def get_warehouses(self) -> List[Warehouse]:
         """Get list of available warehouses"""

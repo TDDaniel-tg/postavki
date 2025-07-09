@@ -71,29 +71,62 @@ async def process_api_key(message: Message, state: FSMContext, db: DatabaseManag
     processing_msg = await message.answer("🔄 Проверка API ключа...")
     
     try:
-        # Validate API key
+        # Validate API key with detailed feedback
         async with WildberriesAPI(api_key) as api:
             is_valid = await api.validate_api_key()
-        
-        if not is_valid:
-            await processing_msg.edit_text("❌ Неверный API ключ. Попробуйте еще раз.")
-            return
-        
-        # API key is valid, ask for account name
-        await state.update_data(api_key=api_key)
-        await state.set_state(AccountStates.waiting_for_account_name)
-        
-        await processing_msg.edit_text(
-            "✅ API ключ принят!\n\n"
-            "Введите название для этого аккаунта (например: 'Основной' или 'ИП Иванов'):"
-        )
+            
+            if is_valid and not api.demo_mode:
+                # Real API working
+                await state.update_data(api_key=api_key)
+                await state.set_state(AccountStates.waiting_for_account_name)
+                
+                await processing_msg.edit_text(
+                    "✅ API ключ валиден и работает!\n\n"
+                    "🔗 Подключение к Wildberries API успешно\n\n"
+                    "Введите название для этого аккаунта (например: 'Основной' или 'ИП Иванов'):"
+                )
+                return
+                
+            elif is_valid and api.demo_mode:
+                # Demo mode (API endpoints unavailable)
+                await state.update_data(api_key=api_key)
+                await state.set_state(AccountStates.waiting_for_account_name)
+                
+                await processing_msg.edit_text(
+                    "⚠️ API ключ принят (демо-режим)\n\n"
+                    "🔧 API Wildberries временно недоступен\n"
+                    "🎭 Бот будет работать с тестовыми данными\n\n"
+                    "Введите название для этого аккаунта:"
+                )
+                return
+                
+            else:
+                # Invalid API key
+                await processing_msg.edit_text(
+                    "❌ API ключ не прошел валидацию\n\n"
+                    "🔍 Проверьте:\n"
+                    "• Правильность копирования ключа\n"
+                    "• Права доступа к API поставок\n"
+                    "• Активность аккаунта WB\n\n"
+                    "💡 Отправьте новый API ключ или /cancel для отмены"
+                )
+                return
         
     except InvalidAPIKeyError:
-        await processing_msg.edit_text("❌ Неверный API ключ. Проверьте и попробуйте снова.")
+        await processing_msg.edit_text(
+            "❌ API ключ недействителен\n\n"
+            "🔑 Получите новый ключ:\n"
+            "1. Личный кабинет WB\n"
+            "2. Профиль → Настройки → Доступ к новому API\n"
+            "3. Создайте ключ с правами на поставки\n\n"
+            "💡 Отправьте правильный ключ или /cancel"
+        )
     except Exception as e:
         logger.error(f"Error validating API key: {e}")
         await processing_msg.edit_text(
-            "❌ Ошибка при проверке ключа. Попробуйте позже."
+            "❌ Ошибка при проверке ключа\n\n"
+            f"📋 Детали: {str(e)[:100]}...\n\n"
+            "🔄 Попробуйте позже или обратитесь в поддержку"
         )
 
 
