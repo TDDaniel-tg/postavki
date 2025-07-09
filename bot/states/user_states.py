@@ -20,4 +20,11 @@ class FilterStates(StatesGroup):
     selecting_regions = State()
     setting_coefficient = State()
     setting_time_slots = State()
-    setting_auto_booking = State() 
+    setting_auto_booking = State()
+
+
+class BookingStates(StatesGroup):
+    """Supply booking states"""
+    waiting_for_supply_number = State()
+    confirming_booking = State()
+    selecting_account_for_booking = State() 

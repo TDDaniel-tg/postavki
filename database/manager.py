@@ -185,4 +185,17 @@ class DatabaseManager:
             )
             users = result.scalars().all()
             # Filter users with at least one active account
-            return [u for u in users if any(acc.is_active for acc in u.wb_accounts)] 
+            return [u for u in users if any(acc.is_active for acc in u.wb_accounts)]
+    
+    async def update_booked_slot_supply_number(self, user_id: int, slot_id: str, supply_number: str) -> bool:
+        """Update booked slot with supply number"""
+        async with self.session() as session:
+            result = await session.execute(
+                update(BookedSlot)
+                .where(
+                    BookedSlot.user_id == user_id,
+                    BookedSlot.slot_id == slot_id
+                )
+                .values(supply_number=supply_number)
+            )
+            return result.rowcount > 0 

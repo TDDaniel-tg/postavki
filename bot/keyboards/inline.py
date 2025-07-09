@@ -199,4 +199,26 @@ def get_auto_booking_keyboard(enabled: bool = False) -> InlineKeyboardMarkup:
         )
     )
     
+    return builder.as_markup()
+
+
+def get_account_selection_keyboard(accounts: List) -> InlineKeyboardMarkup:
+    """Get keyboard for account selection during booking"""
+    builder = InlineKeyboardBuilder()
+    
+    for account in accounts:
+        builder.row(
+            InlineKeyboardButton(
+                text=f"👤 {account.name}",
+                callback_data=f"select_account_{account.id}"
+            )
+        )
+    
+    builder.row(
+        InlineKeyboardButton(
+            text="❌ Отмена",
+            callback_data="cancel_booking"
+        )
+    )
+    
     return builder.as_markup() 

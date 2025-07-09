@@ -87,6 +87,7 @@ class BookedSlot(Base):
     supply_date = Column(DateTime, nullable=False)
     time_slot = Column(String(50), nullable=False)
     coefficient = Column(Float, nullable=False)
+    supply_number = Column(String(255), nullable=True)  # User's supply number
     
     # Booking details
     booked_at = Column(DateTime, default=datetime.utcnow)

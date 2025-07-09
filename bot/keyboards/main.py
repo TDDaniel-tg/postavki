@@ -12,8 +12,11 @@ def get_main_keyboard(has_accounts: bool = False) -> ReplyKeyboardMarkup:
             KeyboardButton(text="⚙️ Настройки")
         )
         builder.row(
-            KeyboardButton(text="💼 Мои аккаунты"),
+            KeyboardButton(text="🚚 Забронировать поставку"),
             KeyboardButton(text="📋 История бронирований")
+        )
+        builder.row(
+            KeyboardButton(text="💼 Мои аккаунты")
         )
     
     builder.row(

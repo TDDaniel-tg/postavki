@@ -112,4 +112,106 @@ class BookingService:
             
         except Exception as e:
             logger.error(f"Error in book_slot_by_id: {e}")
+            return False
+    
+    async def auto_book_supply(self, user_id: int, account_id: int, supply_number: str) -> bool:
+        """Automatically find and book supply slot based on user filters"""
+        try:
+            # Get user with accounts and filters
+            user = await self.db.get_user_with_accounts(user_id)
+            if not user:
+                logger.error(f"User {user_id} not found")
+                return False
+            
+            # Get specific account
+            account = next((acc for acc in user.wb_accounts if acc.id == account_id), None)
+            if not account or not account.is_active:
+                logger.error(f"Account {account_id} not found or inactive")
+                return False
+            
+            # Get user filters
+            filters = await self.db.get_user_filters(user.id)
+            
+            logger.info(f"Starting auto booking for supply {supply_number}, user {user_id}, account {account.name}")
+            
+            # Get available slots from API
+            async with WildberriesAPI(account.api_key) as api:
+                available_slots = await api.get_supply_slots(days_ahead=14)
+            
+            if not available_slots:
+                logger.warning("No available slots found")
+                return False
+            
+            # Filter slots based on user preferences
+            suitable_slots = []
+            
+            for slot in available_slots:
+                if not slot.is_available:
+                    continue
+                
+                # Apply filters
+                if filters:
+                    # Filter by warehouses
+                    if filters.warehouses:
+                        allowed_warehouses = filters.warehouses
+                        if slot.warehouse_id not in allowed_warehouses:
+                            continue
+                    
+                    # Filter by regions
+                    if filters.regions:
+                        allowed_regions = filters.regions
+                        if slot.region and slot.region not in allowed_regions:
+                            continue
+                    
+                    # Filter by coefficient
+                    if filters.min_coefficient is not None and slot.coefficient < filters.min_coefficient:
+                        continue
+                    if filters.max_coefficient is not None and slot.coefficient > filters.max_coefficient:
+                        continue
+                    
+                    # Filter by time slots (simplified check)
+                    if filters.time_slots:
+                        allowed_times = filters.time_slots
+                        slot_time = f"{slot.time_start}-{slot.time_end}"
+                        if not any(time in slot_time for time in allowed_times):
+                            continue
+                
+                suitable_slots.append(slot)
+            
+            if not suitable_slots:
+                logger.warning("No suitable slots found after applying filters")
+                return False
+            
+            # Sort slots by preference (earliest date, best coefficient)
+            suitable_slots.sort(key=lambda x: (x.date, -x.coefficient))
+            
+            # Try to book the best slot
+            best_slot = suitable_slots[0]
+            
+            logger.info(f"Found suitable slot: {best_slot.warehouse_name} on {best_slot.date} {best_slot.time_start}-{best_slot.time_end}")
+            
+            # Book the slot
+            success = await self.book_slot(
+                user_id=user.id,
+                account=account,
+                slot=best_slot,
+                auto_booked=True
+            )
+            
+            if success:
+                # Update booking record with supply number
+                await self.db.update_booked_slot_supply_number(
+                    user_id=user.id,
+                    slot_id=best_slot.id,
+                    supply_number=supply_number
+                )
+                
+                logger.info(f"Successfully auto-booked supply {supply_number} to slot {best_slot.id}")
+                return True
+            else:
+                logger.warning(f"Failed to book slot {best_slot.id}")
+                return False
+            
+        except Exception as e:
+            logger.error(f"Error in auto_book_supply: {e}")
             return False 
