@@ -13,15 +13,19 @@ from .exceptions import WBAPIError, InvalidAPIKeyError, RateLimitError, BookingE
 class WildberriesAPI:
     """Wildberries API client for supply management"""
     
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str, force_demo: bool = False):
         self.api_key = api_key
         self.base_url = settings.WB_API_BASE_URL
         self.backup_url = settings.WB_API_BACKUP_URL
         self.current_url = self.base_url
         self.timeout = aiohttp.ClientTimeout(total=settings.WB_API_TIMEOUT)
         self.session: Optional[aiohttp.ClientSession] = None
-        self.demo_mode = False  # Включается если API недоступен
+        
+        # Demo mode settings
+        self.demo_mode = force_demo or settings.WB_API_FORCE_DEMO_MODE
+        self.allow_demo_fallback = settings.WB_API_ALLOW_DEMO_FALLBACK
         self.auth_params = {}  # Параметры авторизации для запросов
+        self.validated_endpoints = {}  # Кэш проверенных эндпоинтов
         
     async def _switch_to_backup(self):
         """Switch to backup URL if main URL fails"""
@@ -34,11 +38,16 @@ class WildberriesAPI:
             return True
         return False
     
-    async def _enable_demo_mode(self):
+    async def _enable_demo_mode(self, reason: str = "API endpoints unavailable"):
         """Enable demo mode with mock data"""
-        if not self.demo_mode:
-            logger.warning("Enabling demo mode - API endpoints unavailable")
+        if not self.demo_mode and self.allow_demo_fallback:
+            logger.warning(f"Enabling demo mode - {reason}")
             self.demo_mode = True
+            return True
+        elif not self.allow_demo_fallback:
+            logger.error(f"Demo fallback disabled - {reason}")
+            return False
+        return True
         
     async def __aenter__(self):
         """Async context manager entry"""
@@ -341,8 +350,9 @@ class WildberriesAPI:
         except Exception as e:
             logger.error(f"Error validating API key: {e}")
             # Enable demo mode and consider key valid for demo
-            await self._enable_demo_mode()
-            return True
+            if await self._enable_demo_mode("API key validation failed"):
+                return True
+            return False
     
     async def _update_session_config(self, auth_method: dict):
         """Update session configuration based on working auth method"""
@@ -395,6 +405,59 @@ class WildberriesAPI:
         
         if not self.api_key.replace("-", "").replace("_", "").isalnum():
             logger.info("ℹ️  API ключ содержит специальные символы (возможно, это нормально)")
+    
+    async def _try_endpoint_variants(self, endpoint_type: str) -> Optional[str]:
+        """Try different endpoint variants and return working one"""
+        endpoints_map = {
+            "warehouses": [
+                settings.WB_API_WAREHOUSES_ENDPOINT,
+                settings.WB_API_ALT_WAREHOUSES,
+                "/api/v2/warehouses",
+                "/warehouses"
+            ],
+            "slots": [
+                settings.WB_API_SLOTS_ENDPOINT,
+                settings.WB_API_ALT_SLOTS,
+                "/api/v2/supplies/acceptance/list",
+                "/api/v1/supply/slots",
+                "/supply/schedule"
+            ],
+            "book": [
+                settings.WB_API_BOOK_ENDPOINT,
+                settings.WB_API_ALT_BOOK,
+                "/api/v2/supplies/acceptance/book",
+                "/supply/book"
+            ]
+        }
+        
+        # Return cached endpoint if available
+        if endpoint_type in self.validated_endpoints:
+            return self.validated_endpoints[endpoint_type]
+        
+        endpoints = endpoints_map.get(endpoint_type, [])
+        
+        for endpoint in endpoints:
+            try:
+                logger.debug(f"Testing endpoint: {endpoint}")
+                
+                # Test with HEAD request to avoid large responses
+                async with self.session.head(f"{self.current_url}{endpoint}") as response:
+                    if response.status in [200, 401, 403]:  # Valid response (401/403 means endpoint exists)
+                        logger.info(f"✅ Working endpoint found: {endpoint}")
+                        self.validated_endpoints[endpoint_type] = endpoint
+                        return endpoint
+                    elif response.status == 404:
+                        logger.debug(f"Endpoint not found: {endpoint}")
+                        continue
+                    else:
+                        logger.debug(f"Endpoint {endpoint} returned: {response.status}")
+                        
+            except Exception as e:
+                logger.debug(f"Endpoint {endpoint} failed: {e}")
+                continue
+        
+        logger.warning(f"No working endpoints found for {endpoint_type}")
+        return None
 
     async def get_warehouses(self) -> List[Warehouse]:
         """Get list of available warehouses"""
@@ -403,25 +466,35 @@ class WildberriesAPI:
             return self._generate_mock_warehouses()
             
         try:
-            data = await self._make_request("GET", "/api/v1/warehouses")
+            # Find working endpoint
+            endpoint = await self._try_endpoint_variants("warehouses")
+            if not endpoint:
+                if await self._enable_demo_mode("No working warehouses endpoint found"):
+                    return self._generate_mock_warehouses()
+                raise WBAPIError("No working warehouses endpoint found")
+            
+            data = await self._make_request("GET", endpoint)
             
             warehouses = []
-            for item in data.get("data", []):
+            # Handle different response formats
+            items = data.get("data", data.get("result", data if isinstance(data, list) else []))
+            
+            for item in items:
                 warehouse = Warehouse(
-                    id=str(item.get("id")),
-                    name=item.get("name", ""),
-                    region=item.get("region", ""),
-                    address=item.get("address"),
-                    is_active=item.get("isActive", True)
+                    id=str(item.get("id", item.get("warehouseId", ""))),
+                    name=item.get("name", item.get("warehouseName", "")),
+                    region=item.get("region", item.get("city", "")),
+                    address=item.get("address", item.get("fullAddress", "")),
+                    is_active=item.get("isActive", item.get("active", True))
                 )
                 warehouses.append(warehouse)
             
+            logger.info(f"✅ Retrieved {len(warehouses)} warehouses from real API")
             return warehouses
             
         except Exception as e:
             logger.error(f"Error getting warehouses: {e}")
-            if not self.demo_mode:
-                await self._enable_demo_mode()
+            if await self._enable_demo_mode(f"Warehouses API error: {str(e)}"):
                 return self._generate_mock_warehouses()
             raise
 
@@ -432,41 +505,67 @@ class WildberriesAPI:
             return self._generate_mock_slots()
             
         try:
+            # Find working endpoint
+            endpoint = await self._try_endpoint_variants("slots")
+            if not endpoint:
+                if await self._enable_demo_mode("No working slots endpoint found"):
+                    return self._generate_mock_slots()
+                raise WBAPIError("No working slots endpoint found")
+            
             # Calculate date range
             date_from = datetime.now()
             date_to = date_from + timedelta(days=days_ahead)
             
             params = {
                 "dateFrom": date_from.strftime("%Y-%m-%d"),
-                "dateTo": date_to.strftime("%Y-%m-%d")
+                "dateTo": date_to.strftime("%Y-%m-%d"),
+                "limit": 1000,
+                "days": days_ahead
             }
             
-            data = await self._make_request("GET", "/api/v1/supply/slots", params=params)
+            data = await self._make_request("GET", endpoint, params=params)
             
             slots = []
-            for item in data.get("data", []):
-                # Parse slot data
-                slot = SupplySlot(
-                    id=str(item.get("id")),
-                    warehouse_id=str(item.get("warehouseId")),
-                    warehouse_name=item.get("warehouseName", ""),
-                    date=datetime.fromisoformat(item.get("date").replace("Z", "+00:00")),
-                    time_start=item.get("timeStart", ""),
-                    time_end=item.get("timeEnd", ""),
-                    coefficient=float(item.get("coefficient", 1.0)),
-                    is_available=item.get("isAvailable", True),
-                    region=item.get("region")
-                )
-                
-                if slot.is_available:
-                    slots.append(slot)
+            # Handle different response formats  
+            items = data.get("data", data.get("result", data.get("slots", data if isinstance(data, list) else [])))
             
+            for item in items:
+                try:
+                    # Parse date handling different formats
+                    date_str = item.get("date", item.get("supplyDate", ""))
+                    if date_str:
+                        if "T" in date_str:
+                            supply_date = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+                        else:
+                            supply_date = datetime.strptime(date_str, "%Y-%m-%d")
+                    else:
+                        continue
+                    
+                    slot = SupplySlot(
+                        id=str(item.get("id", item.get("slotId", f"{item.get('warehouseId', '')}_{date_str}"))),
+                        warehouse_id=str(item.get("warehouseId", item.get("warehouse_id", ""))),
+                        warehouse_name=item.get("warehouseName", item.get("warehouse_name", "")),
+                        date=supply_date,
+                        time_start=item.get("timeStart", item.get("time_start", "")),
+                        time_end=item.get("timeEnd", item.get("time_end", "")),
+                        coefficient=float(item.get("coefficient", item.get("coeff", 1.0))),
+                        is_available=item.get("isAvailable", item.get("available", True)),
+                        region=item.get("region", item.get("city", ""))
+                    )
+                    
+                    if slot.is_available:
+                        slots.append(slot)
+                
+                except Exception as e:
+                    logger.debug(f"Error parsing slot item: {e}")
+                    continue
+            
+            logger.info(f"✅ Retrieved {len(slots)} supply slots from real API")
             return slots
             
         except Exception as e:
             logger.error(f"Error getting supply slots: {e}")
-            if not self.demo_mode:
-                await self._enable_demo_mode()
+            if await self._enable_demo_mode(f"Supply slots API error: {str(e)}"):
                 return self._generate_mock_slots()
             raise
 
@@ -484,25 +583,34 @@ class WildberriesAPI:
                 raise BookingError("Mock: Slot already taken by another supplier")
         
         try:
+            # Find working endpoint
+            endpoint = await self._try_endpoint_variants("book")
+            if not endpoint:
+                if await self._enable_demo_mode("No working booking endpoint found"):
+                    return await self.book_slot(slot_id)  # Retry in demo mode
+                raise WBAPIError("No working booking endpoint found")
+            
             data = {
-                "slotId": slot_id
+                "slotId": slot_id,
+                "id": slot_id  # Some APIs use different field names
             }
             
-            result = await self._make_request("POST", "/api/v1/supply/book", json=data)
+            result = await self._make_request("POST", endpoint, json=data)
             
-            if result.get("success"):
-                logger.info(f"Successfully booked slot {slot_id}")
+            # Handle different response formats
+            success = result.get("success", result.get("result", False))
+            if success or result.get("status") == "success":
+                logger.info(f"✅ Successfully booked slot {slot_id}")
                 return True
             else:
-                error_msg = result.get("error", "Unknown error")
+                error_msg = result.get("error", result.get("message", "Unknown error"))
                 raise BookingError(f"Failed to book slot: {error_msg}")
                 
         except BookingError:
             raise
         except Exception as e:
             logger.error(f"Error booking slot {slot_id}: {e}")
-            if not self.demo_mode:
-                await self._enable_demo_mode()
+            if await self._enable_demo_mode(f"Booking API error: {str(e)}"):
                 # Try mock booking in demo mode
                 return await self.book_slot(slot_id)
             raise BookingError(f"Booking failed: {str(e)}")

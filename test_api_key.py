@@ -17,7 +17,7 @@ async def test_api_key(api_key: str):
     print("=" * 60)
     
     # Создаем клиент
-    async with WildberriesAPI(api_key) as client:
+    async with WildberriesAPI(api_key, force_demo=False) as client:
         
         # 1. Валидация ключа
         print("\n1️⃣ Валидация API ключа...")

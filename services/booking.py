@@ -24,7 +24,7 @@ class BookingService:
                 return False
             
             # Try to book slot
-            async with WildberriesAPI(account.api_key) as api:
+            async with WildberriesAPI(account.api_key, force_demo=False) as api:
                 success = await api.book_slot(slot.id)
             
             if success:
@@ -82,7 +82,7 @@ class BookingService:
                     continue
                 
                 try:
-                    async with WildberriesAPI(account.api_key) as api:
+                    async with WildberriesAPI(account.api_key, force_demo=False) as api:
                         # Get current slots
                         slots = await api.get_supply_slots()
                         
@@ -135,7 +135,7 @@ class BookingService:
             logger.info(f"Starting auto booking for supply {supply_number}, user {user_id}, account {account.name}")
             
             # Get available slots from API
-            async with WildberriesAPI(account.api_key) as api:
+            async with WildberriesAPI(account.api_key, force_demo=False) as api:
                 available_slots = await api.get_supply_slots(days_ahead=14)
             
             if not available_slots:

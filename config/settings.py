@@ -19,11 +19,20 @@ class Settings(BaseSettings):
     WB_API_TIMEOUT: int = 30
     WB_API_USE_BACKUP: bool = False
     
-    # API Endpoints (можно настроить разные варианты)
-    WB_API_WAREHOUSES_ENDPOINT: str = "/api/v1/warehouses"
-    WB_API_SLOTS_ENDPOINT: str = "/api/v1/supply/slots"
-    WB_API_BOOK_ENDPOINT: str = "/api/v1/supply/book"
-    WB_API_BOOKED_ENDPOINT: str = "/api/v1/supply/booked"
+    # Demo mode settings
+    WB_API_FORCE_DEMO_MODE: bool = False  # Принудительный демо-режим
+    WB_API_ALLOW_DEMO_FALLBACK: bool = True  # Разрешить fallback в демо при ошибках API
+    
+    # API Endpoints (реальные эндпоинты WB API)
+    WB_API_WAREHOUSES_ENDPOINT: str = "/api/v3/warehouses"
+    WB_API_SLOTS_ENDPOINT: str = "/api/v3/supplies/acceptance/list"
+    WB_API_BOOK_ENDPOINT: str = "/api/v3/supplies/acceptance/book"
+    WB_API_BOOKED_ENDPOINT: str = "/api/v3/supplies/acceptance/booked"
+    
+    # Alternative endpoints to try
+    WB_API_ALT_WAREHOUSES: str = "/api/v1/warehouses"
+    WB_API_ALT_SLOTS: str = "/api/v1/supply/schedule"
+    WB_API_ALT_BOOK: str = "/api/v1/supply/book"
     
     # Network settings
     WB_API_USE_IPV4_ONLY: bool = True

@@ -4,6 +4,7 @@ from .start import router as start_router
 from .account import router as account_router
 from .settings import router as settings_router
 from .booking import router as booking_router
+from .admin import router as admin_router
 
 
 def setup_handlers() -> Router:
@@ -15,5 +16,6 @@ def setup_handlers() -> Router:
     router.include_router(account_router)
     router.include_router(settings_router)
     router.include_router(booking_router)
+    router.include_router(admin_router)
     
     return router 

@@ -83,7 +83,7 @@ class SupplyMonitor:
             
             try:
                 # Get current slots
-                async with WildberriesAPI(account.api_key) as api:
+                async with WildberriesAPI(account.api_key, force_demo=False) as api:
                     current_slots = await api.get_supply_slots()
                 
                 # Apply user filters
