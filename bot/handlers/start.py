@@ -7,13 +7,14 @@ from loguru import logger
 from database import DatabaseManager
 from bot.keyboards import get_main_keyboard
 from bot.states import UserStates
+from services.supply_finder import SupplyFinderService
 
 
 router = Router()
 
 
 @router.message(CommandStart())
-async def cmd_start(message: Message, state: FSMContext, db: DatabaseManager):
+async def cmd_start(message: Message, state: FSMContext, db: DatabaseManager, supply_finder: SupplyFinderService = None):
     """Handle /start command"""
     user_id = message.from_user.id
     
@@ -55,22 +56,42 @@ async def cmd_start(message: Message, state: FSMContext, db: DatabaseManager):
             active_accounts = [acc for acc in accounts if acc.is_active]
             welcome_text += (
                 f"✅ У вас подключено аккаунтов: {len(active_accounts)}/{len(accounts)}\n"
-                f"📊 Мониторинг активен\n\n"
-                f"Используйте меню для управления ⬇️"
+                f"📊 Мониторинг активен\n"
             )
+            
+            # Check for active search
+            has_active_search = False
+            if supply_finder and supply_finder.is_user_searching(user.id):
+                has_active_search = True
+                search_info = supply_finder.get_user_search_info(user.id)
+                welcome_text += (
+                    f"\n🔍 **АКТИВНЫЙ ПОИСК СЛОТА**\n"
+                    f"📦 Поставка: {search_info['supply_number']}\n"
+                    f"⏰ Запущен: {search_info['started_at'].strftime('%H:%M:%S')}\n"
+                    f"⏹️ Для остановки используйте кнопку ниже\n"
+                )
+            
+            welcome_text += f"\nИспользуйте меню для управления ⬇️"
         else:
             welcome_text += (
                 "❗ У вас нет подключенных аккаунтов.\n"
                 "Нажмите 'Добавить аккаунт' для начала работы ⬇️"
             )
+            has_active_search = False
     
     # Clear state
     await state.clear()
     
     # Send welcome message
+    final_has_accounts = user and len(await db.get_user_accounts(user.id)) > 0
+    final_has_active_search = has_active_search if 'has_active_search' in locals() else False
+    
     await message.answer(
         text=welcome_text,
-        reply_markup=get_main_keyboard(has_accounts=user and len(await db.get_user_accounts(user.id)) > 0)
+        reply_markup=get_main_keyboard(
+            has_accounts=final_has_accounts,
+            has_active_search=final_has_active_search
+        )
     )
 
 
@@ -118,7 +139,7 @@ async def help_button(message: Message):
 
 @router.message(Command("status"))
 @router.message(F.text == "📊 Статус мониторинга")
-async def cmd_status(message: Message, db: DatabaseManager):
+async def cmd_status(message: Message, db: DatabaseManager, supply_finder: SupplyFinderService = None):
     """Handle /status command"""
     user = await db.get_user_with_accounts(message.from_user.id)
     
@@ -165,5 +186,19 @@ async def cmd_status(message: Message, db: DatabaseManager):
     else:
         status_text += "❌ Мониторинг: <b>Неактивен</b>\n"
         status_text += "⚠️ Добавьте хотя бы один аккаунт\n"
+    
+    # Add active search info
+    if supply_finder and supply_finder.is_user_searching(user.id):
+        search_info = supply_finder.get_user_search_info(user.id)
+        duration = search_info['started_at']
+        
+        status_text += "\n" + "="*30 + "\n"
+        status_text += "🔍 <b>АКТИВНЫЙ ПОИСК СЛОТА</b>\n"
+        status_text += f"📦 Поставка: <code>{search_info['supply_number']}</code>\n"
+        status_text += f"⏰ Запущен: {duration.strftime('%H:%M:%S %d.%m.%Y')}\n"
+        status_text += f"🔁 Интервал поиска: 30 сек\n"
+        status_text += f"⏹️ Остановить: /stop_search\n"
+    else:
+        status_text += "\n💤 <i>Активных поисков нет</i>\n"
     
     await message.answer(status_text, parse_mode="HTML") 

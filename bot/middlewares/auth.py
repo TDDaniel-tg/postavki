@@ -32,4 +32,20 @@ class BookingServiceMiddleware(BaseMiddleware):
         data: Dict[str, Any]
     ) -> Any:
         data["booking_service"] = self.booking_service
+        return await handler(event, data)
+
+
+class SupplyFinderMiddleware(BaseMiddleware):
+    """Middleware to inject supply finder service into handlers"""
+    
+    def __init__(self, supply_finder_service):
+        self.supply_finder_service = supply_finder_service
+    
+    async def __call__(
+        self,
+        handler: Callable[[TelegramObject, Dict[str, Any]], Awaitable[Any]],
+        event: TelegramObject,
+        data: Dict[str, Any]
+    ) -> Any:
+        data["supply_finder"] = self.supply_finder_service
         return await handler(event, data) 

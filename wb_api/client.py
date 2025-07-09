@@ -159,41 +159,62 @@ class WildberriesAPI:
             raise WBAPIError(f"Request failed: {str(e)}")
     
     def _generate_mock_warehouses(self) -> List[Warehouse]:
-        """Generate mock warehouses for demo mode"""
+        """Generate mock warehouses for demo mode based on real WB warehouses"""
         mock_warehouses = [
             Warehouse(
-                id="1",
+                id="117501",
                 name="Коледино",
                 region="Московская область",
-                address="г. Подольск, промзона Коледино",
+                address="Московская область, г. Подольск, деревня Коледино",
                 is_active=True
             ),
             Warehouse(
-                id="2", 
-                name="Электросталь",
-                region="Московская область",
-                address="г. Электросталь",
+                id="120762", 
+                name="Санкт-Петербург (Уткина Заводе)",
+                region="г. Санкт-Петербург",
+                address="г. Санкт-Петербург, Уткина Заводе",
                 is_active=True
             ),
             Warehouse(
-                id="3",
+                id="117986",
+                name="Краснодар (Тихорецкая)",
+                region="Краснодарский край",
+                address="г. Краснодар, ул. Тихорецкая",
+                is_active=True
+            ),
+            Warehouse(
+                id="130744",
+                name="Екатеринбург - Перспективный 12/2",
+                region="Свердловская область", 
+                address="г. Екатеринбург, ул. Перспективная, 12/2",
+                is_active=True
+            ),
+            Warehouse(
+                id="159402",
+                name="Тула",
+                region="Тульская область",
+                address="г. Тула, складской комплекс",
+                is_active=True
+            ),
+            Warehouse(
+                id="2737",
+                name="Невинномысск",
+                region="Ставропольский край",
+                address="г. Невинномысск, промзона",
+                is_active=True
+            ),
+            Warehouse(
+                id="206236",
                 name="Казань",
                 region="Республика Татарстан",
-                address="г. Казань",
+                address="г. Казань, складской комплекс",
                 is_active=True
             ),
             Warehouse(
-                id="4",
+                id="686",
                 name="Новосибирск",
-                region="Новосибирская область", 
-                address="г. Новосибирск",
-                is_active=True
-            ),
-            Warehouse(
-                id="5",
-                name="Санкт-Петербург (Шушары)",
-                region="Санкт-Петербург",
-                address="г. Санкт-Петербург, п. Шушары",
+                region="Новосибирская область",
+                address="г. Новосибирск, складской комплекс",
                 is_active=True
             )
         ]

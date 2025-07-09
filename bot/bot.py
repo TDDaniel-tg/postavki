@@ -5,7 +5,7 @@ from loguru import logger
 
 from config import settings
 from database import DatabaseManager
-from services import SupplyMonitor, NotificationService, BookingService
+from services import SupplyMonitor, NotificationService, BookingService, SupplyFinderService
 from .handlers import setup_handlers
 from .middlewares import setup_middlewares
 
@@ -25,6 +25,7 @@ async def create_bot():
     # Initialize services
     notification_service = NotificationService(bot)
     booking_service = BookingService(db, notification_service)
+    supply_finder_service = SupplyFinderService(db, booking_service, notification_service)
     monitor = SupplyMonitor(db, notification_service, booking_service)
     
     # Setup handlers
@@ -32,7 +33,7 @@ async def create_bot():
     dp.include_router(router)
     
     # Setup middlewares
-    setup_middlewares(dp, db, booking_service)
+    setup_middlewares(dp, db, booking_service, supply_finder_service)
     
     # Start monitoring
     await monitor.start()
@@ -41,6 +42,7 @@ async def create_bot():
     dp["bot"] = bot
     dp["db"] = db
     dp["monitor"] = monitor
+    dp["supply_finder"] = supply_finder_service
     
     logger.info("Bot initialized successfully")
     
@@ -58,6 +60,10 @@ async def run_bot():
         logger.error(f"Bot error: {e}")
     finally:
         # Cleanup
+        supply_finder = dp.get("supply_finder")
+        if supply_finder:
+            await supply_finder.stop_all_searches()
+        
         monitor = dp.get("monitor")
         if monitor:
             await monitor.stop()

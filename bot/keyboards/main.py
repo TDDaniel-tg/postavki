@@ -2,7 +2,7 @@ from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from aiogram.utils.keyboard import ReplyKeyboardBuilder
 
 
-def get_main_keyboard(has_accounts: bool = False) -> ReplyKeyboardMarkup:
+def get_main_keyboard(has_accounts: bool = False, has_active_search: bool = False) -> ReplyKeyboardMarkup:
     """Get main menu keyboard"""
     builder = ReplyKeyboardBuilder()
     
@@ -11,10 +11,20 @@ def get_main_keyboard(has_accounts: bool = False) -> ReplyKeyboardMarkup:
             KeyboardButton(text="📊 Статус мониторинга"),
             KeyboardButton(text="⚙️ Настройки")
         )
-        builder.row(
-            KeyboardButton(text="🚚 Забронировать поставку"),
-            KeyboardButton(text="📋 История бронирований")
-        )
+        
+        if has_active_search:
+            # Show stop search button when search is active
+            builder.row(
+                KeyboardButton(text="⏹️ Остановить поиск"),
+                KeyboardButton(text="📋 История бронирований")
+            )
+        else:
+            # Show booking button when no active search
+            builder.row(
+                KeyboardButton(text="🚚 Забронировать поставку"),
+                KeyboardButton(text="📋 История бронирований")
+            )
+        
         builder.row(
             KeyboardButton(text="💼 Мои аккаунты")
         )

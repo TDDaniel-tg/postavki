@@ -6,6 +6,7 @@ from loguru import logger
 
 from database import DatabaseManager
 from services.booking import BookingService
+from services.supply_finder import SupplyFinderService
 from wb_api import WildberriesAPI
 from bot.states import BookingStates
 from bot.keyboards.main import get_cancel_keyboard, get_main_keyboard
@@ -106,7 +107,7 @@ async def cmd_booking_history(message: Message, db: DatabaseManager):
 
 
 @router.message(F.text == "🚚 Забронировать поставку")
-async def cmd_book_supply(message: Message, state: FSMContext, db: DatabaseManager):
+async def cmd_book_supply(message: Message, state: FSMContext, db: DatabaseManager, supply_finder: SupplyFinderService = None):
     """Start supply booking process"""
     user = await db.get_user_with_accounts(message.from_user.id)
     
@@ -127,6 +128,20 @@ async def cmd_book_supply(message: Message, state: FSMContext, db: DatabaseManag
         await message.answer(
             "❌ У вас нет активных аккаунтов.\n"
             "Активируйте аккаунт в разделе 'Мои аккаунты'."
+        )
+        return
+    
+    # Check if user already has active search
+    if supply_finder and supply_finder.is_user_searching(user.id):
+        search_info = supply_finder.get_user_search_info(user.id)
+        duration = search_info['started_at']
+        
+        await message.answer(
+            f"🔍 **У вас уже запущен поиск!**\n\n"
+            f"📦 **Поставка**: {search_info['supply_number']}\n"
+            f"⏰ **Начат**: {duration.strftime('%H:%M:%S')}\n\n"
+            f"❌ Сначала остановите текущий поиск командой /stop_search",
+            parse_mode="Markdown"
         )
         return
     
@@ -281,7 +296,7 @@ async def process_supply_number(message: Message, state: FSMContext, db: Databas
 
 
 @router.message(BookingStates.confirming_booking)
-async def confirm_supply_booking(message: Message, state: FSMContext, db: DatabaseManager, booking_service: BookingService):
+async def confirm_supply_booking(message: Message, state: FSMContext, db: DatabaseManager, booking_service: BookingService, supply_finder: SupplyFinderService = None):
     """Confirm and execute supply booking"""
     if message.text == "❌ Нет":
         await state.clear()
@@ -323,16 +338,16 @@ async def confirm_supply_booking(message: Message, state: FSMContext, db: Databa
     
     # Show processing message
     processing_msg = await message.answer(
-        "🔄 <b>Поиск и бронирование слота...</b>\n\n"
+        "🔄 <b>Поиск подходящего слота...</b>\n\n"
         f"📦 Поставка: <code>{supply_number}</code>\n"
         f"👤 Аккаунт: <b>{account.name}</b>\n\n"
-        "⏳ Это может занять несколько секунд...",
+        "⏳ Первая попытка поиска...",
         parse_mode="HTML",
         reply_markup=get_main_keyboard(True)
     )
     
     try:
-        # Execute booking
+        # Try immediate booking first
         success = await booking_service.auto_book_supply(
             user_id=user.id,
             account_id=account_id,
@@ -341,33 +356,99 @@ async def confirm_supply_booking(message: Message, state: FSMContext, db: Databa
         
         if success:
             await processing_msg.edit_text(
-                "✅ <b>ПОСТАВКА УСПЕШНО ЗАБРОНИРОВАНА!</b>\n\n"
+                "✅ <b>ПОСТАВКА ЗАБРОНИРОВАНА!</b>\n\n"
                 f"📦 Поставка: <code>{supply_number}</code>\n"
                 f"👤 Аккаунт: <b>{account.name}</b>\n\n"
-                "🎉 Слот найден и забронирован автоматически!\n"
+                "🎉 Подходящий слот найден сразу!\n"
                 "📱 Проверьте детали в 'История бронирований'.",
                 parse_mode="HTML"
             )
         else:
+            # No immediate slot found - start continuous search
             await processing_msg.edit_text(
-                "❌ <b>НЕ УДАЛОСЬ ЗАБРОНИРОВАТЬ</b>\n\n"
-                f"📦 Поставка: <code>{supply_number}</code>\n\n"
-                "🔍 Возможные причины:\n"
-                "• Нет доступных слотов по вашим фильтрам\n"
-                "• Проблемы с подключением к WB API\n"
-                "• Все подходящие слоты уже заняты\n\n"
-                "💡 Попробуйте:\n"
-                "• Изменить настройки фильтров\n"
-                "• Повторить через несколько минут",
+                "🔍 <b>ЗАПУЩЕН НЕПРЕРЫВНЫЙ ПОИСК</b>\n\n"
+                f"📦 Поставка: <code>{supply_number}</code>\n"
+                f"👤 Аккаунт: <b>{account.name}</b>\n\n"
+                "⏰ <b>Как это работает:</b>\n"
+                "• Поиск каждые 30 секунд\n"
+                "• Автоматическое бронирование при нахождении\n"
+                "• Уведомления о статусе поиска\n\n"
+                "🎯 Как только найдется подходящий слот - автоматически забронирую!\n\n"
+                "❌ Для остановки поиска используйте /stop_search",
                 parse_mode="HTML"
             )
+            
+            # Start continuous search using SupplyFinderService
+            if supply_finder:
+                search_started = await supply_finder.start_supply_search(
+                    user_id=user.id,
+                    account_id=account_id,
+                    supply_number=supply_number
+                )
+                
+                if not search_started:
+                    await processing_msg.edit_text(
+                        "❌ <b>ОШИБКА ЗАПУСКА ПОИСКА</b>\n\n"
+                        f"📦 Поставка: <code>{supply_number}</code>\n\n"
+                        "🔧 Не удалось запустить непрерывный поиск.\n"
+                        "🔄 Попробуйте позже или обратитесь в поддержку.",
+                        parse_mode="HTML"
+                    )
+            else:
+                logger.warning("SupplyFinderService not available - search not started")
         
     except Exception as e:
         logger.error(f"Error in auto booking: {e}")
         await processing_msg.edit_text(
-            "❌ <b>ОШИБКА ПРИ БРОНИРОВАНИИ</b>\n\n"
+            "❌ <b>ОШИБКА ПРИ ПОИСКЕ</b>\n\n"
             f"📦 Поставка: <code>{supply_number}</code>\n\n"
             f"🔧 Детали ошибки: {str(e)[:100]}...\n\n"
             "🔄 Попробуйте позже или обратитесь в поддержку.",
             parse_mode="HTML"
-        ) 
+        )
+
+
+@router.message(Command("stop_search"))
+async def cmd_stop_search(message: Message, db: DatabaseManager, supply_finder: SupplyFinderService = None):
+    """Stop continuous search for supply slots"""
+    user = await db.get_user(message.from_user.id)
+    if not user:
+        await message.answer("❌ Вы не зарегистрированы. Используйте /start")
+        return
+    
+    if not supply_finder:
+        await message.answer(
+            "❌ Сервис поиска недоступен",
+            parse_mode="Markdown"
+        )
+        return
+    
+    if not supply_finder.is_user_searching(user.id):
+        await message.answer(
+            "ℹ️ **У вас нет активного поиска**\n\n"
+            "💡 Запустите поиск через меню 'Забронировать поставку'",
+            parse_mode="Markdown"
+        )
+        return
+    
+    # Stop the search
+    stopped = await supply_finder.stop_supply_search(user.id)
+    
+    if stopped:
+        await message.answer(
+            "✅ **Поиск остановлен успешно**\n\n"
+            "💡 Можете запустить новый поиск через меню",
+            parse_mode="Markdown"
+        )
+    else:
+        await message.answer(
+            "❌ **Ошибка остановки поиска**\n\n"
+            "🔄 Попробуйте еще раз или перезапустите бота",
+            parse_mode="Markdown"
+        )
+
+
+@router.message(F.text == "⏹️ Остановить поиск") 
+async def cmd_stop_search_button(message: Message, db: DatabaseManager, supply_finder: SupplyFinderService = None):
+    """Stop search via button"""
+    await cmd_stop_search(message, db, supply_finder) 
