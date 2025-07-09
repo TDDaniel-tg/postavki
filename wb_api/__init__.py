@@ -1,6 +1,6 @@
 from .client import WildberriesAPI
 from .models import SupplySlot, Warehouse
-from .exceptions import WBAPIError, InvalidAPIKeyError, RateLimitError
+from .exceptions import WBAPIError, InvalidAPIKeyError, RateLimitError, BookingError
 
 __all__ = [
     "WildberriesAPI", 
@@ -8,5 +8,6 @@ __all__ = [
     "Warehouse",
     "WBAPIError",
     "InvalidAPIKeyError",
-    "RateLimitError"
+    "RateLimitError",
+    "BookingError"
 ] 

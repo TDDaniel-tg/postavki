@@ -8,7 +8,7 @@ from bot.keyboards import get_slot_keyboard
 
 
 class NotificationService:
-    """Service for sending notificationssdfsdfsd"""
+    """Service for sending notifications"""
     
     def __init__(self, bot: Bot):
         self.bot = bot
