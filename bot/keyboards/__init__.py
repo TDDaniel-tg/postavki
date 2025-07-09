@@ -4,7 +4,8 @@ from .inline import (
     get_account_list_keyboard,
     get_settings_keyboard,
     get_filter_keyboard,
-    get_warehouses_keyboard
+    get_warehouses_keyboard,
+    get_auto_booking_keyboard
 )
 
 __all__ = [
@@ -15,5 +16,6 @@ __all__ = [
     "get_account_list_keyboard",
     "get_settings_keyboard",
     "get_filter_keyboard",
-    "get_warehouses_keyboard"
+    "get_warehouses_keyboard",
+    "get_auto_booking_keyboard"
 ] 
