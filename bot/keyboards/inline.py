@@ -164,7 +164,7 @@ def get_warehouses_keyboard(
     return builder.as_markup()
 
 
-def get_auto_booking_keyboard(enabled: bool = False) -> InlineKeyboardMarkup:
+def get_auto_booking_keyboard(enabled: bool = False, limit: int = 5) -> InlineKeyboardMarkup:
     """Get auto booking settings keyboard"""
     builder = InlineKeyboardBuilder()
     
@@ -187,7 +187,7 @@ def get_auto_booking_keyboard(enabled: bool = False) -> InlineKeyboardMarkup:
     if enabled:
         builder.row(
             InlineKeyboardButton(
-                text="⚙️ Настройки автобронирования",
+                text=f"⚙️ Лимит: {limit}/день",
                 callback_data="auto_booking_settings"
             )
         )
@@ -195,6 +195,62 @@ def get_auto_booking_keyboard(enabled: bool = False) -> InlineKeyboardMarkup:
     builder.row(
         InlineKeyboardButton(
             text="◀️ Назад",
+            callback_data="settings"
+        )
+    )
+    
+    return builder.as_markup()
+
+
+def get_regions_keyboard(regions: List[dict], selected: List[str] = None) -> InlineKeyboardMarkup:
+    """Get regions selection keyboard"""
+    builder = InlineKeyboardBuilder()
+    selected = selected or []
+    
+    for region in regions:
+        check = "✅" if region["id"] in selected else "⬜"
+        builder.row(
+            InlineKeyboardButton(
+                text=f"{check} {region['name']}",
+                callback_data=f"toggle_reg_{region['id']}"
+            )
+        )
+    
+    builder.row(
+        InlineKeyboardButton(
+            text="💾 Сохранить",
+            callback_data="save_regions"
+        ),
+        InlineKeyboardButton(
+            text="❌ Отмена",
+            callback_data="settings"
+        )
+    )
+    
+    return builder.as_markup()
+
+
+def get_time_slots_keyboard(time_slots: List[dict], selected: List[str] = None) -> InlineKeyboardMarkup:
+    """Get time slots selection keyboard"""
+    builder = InlineKeyboardBuilder()
+    selected = selected or []
+    
+    for slot in time_slots:
+        check = "✅" if slot["id"] in selected else "⬜"
+        builder.row(
+            InlineKeyboardButton(
+                text=f"{check} {slot['name']}",
+                callback_data=f"toggle_time_{slot['id']}"
+            )
+        )
+    
+    builder.row(
+        InlineKeyboardButton(
+            text="💾 Сохранить",
+            callback_data="save_time_slots"
+        ),
+        InlineKeyboardButton(
+            text="❌ Отмена",
             callback_data="settings"
         )
     )

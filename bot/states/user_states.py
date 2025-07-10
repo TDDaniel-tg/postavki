@@ -21,6 +21,7 @@ class FilterStates(StatesGroup):
     setting_coefficient = State()
     setting_time_slots = State()
     setting_auto_booking = State()
+    setting_quiet_hours = State()
 
 
 class BookingStates(StatesGroup):
